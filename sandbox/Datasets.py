@@ -196,3 +196,41 @@ class Circles(GraphDataset):
         self.node_coordinates = torch.tensor(node_coordinates)
         self.node_graph_index = torch.tensor(node_graph_index)
         self.edge_list = torch.tensor(edges)
+
+    class cross_coupling_test(GraphDataset):
+        
+        def __init__(self):
+            super().__init__()
+
+            import pandas as pd
+            
+            df = pd.read_csv('your_file.csv', nrows=100)
+
+            # Graph list
+            self.graph_list = torch.tensor([0, 1, 2, 3, 4, 5])
+
+            # Number of graphs in the dataset
+            self.num_graphs = 6
+
+            # Generate circle-graphs of varying size
+            node_coordinates = []
+            node_graph_index = []
+            edges = []
+            node_num = 0
+            for i in range(6):
+                for j in range(i+3):
+                    n = i+3
+                    a = 1 / math.sin(math.pi/n)/2
+                    x = j*math.pi*2/n
+                    node_coordinates.append([a*math.cos(x), a*math.sin(x)])
+                    node_graph_index.append(i)
+                    if j == 0:
+                        edges.append([node_num, node_num+n-1])
+                        edges.append([node_num+n-1, node_num])
+                    else:
+                        edges.append([node_num, node_num-1])
+                        edges.append([node_num-1, node_num])
+                    node_num += 1
+            self.node_coordinates = torch.tensor(node_coordinates)
+            self.node_graph_index = torch.tensor(node_graph_index)
+            self.edge_list = torch.tensor(edges)
