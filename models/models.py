@@ -1,5 +1,7 @@
 import torch
 from data.processed.cross_coupling import datasets
+from rbf import RadialBasisFunction
+from f_cut import CosineCutoff
 
 
 class PAINN(torch.nn.Module):
@@ -13,8 +15,9 @@ class PAINN(torch.nn.Module):
             (default 3)
     """
 
-    def __init__(self, output_dim=1, state_dim=10,
-                 num_message_passing_rounds=3):
+    def __init__(self, output_dim=1, state_dim=128,
+                 num_message_passing_rounds=3, r_cut=4, n=20,
+                 f_cut=2):
         super().__init__()
 
         # Define dimensions and other hyperparameters
@@ -22,7 +25,27 @@ class PAINN(torch.nn.Module):
         self.edge_dim = 1
         self.output_dim = output_dim
         self.num_message_passing_rounds = num_message_passing_rounds
+        self.r_cut = r_cut
+        self.f_cut = f_cut
+        self.n = n
 
+        self.rbf = RadialBasisFunction(self.n, self.r_cut)
+        self.cosine_cutoff = CosineCutoff(self.f_cut)
+
+        self.phi_net = torch.nn.Sequential(
+            torch.nn.Linear(self.state_dim, self.state_dim),
+            torch.nn.SiLU(),
+            torch.nn.Linear(self.state_dim, self.state_dim*3),
+        )
+
+        self.filter_net = torch.nn.Sequential(
+            self.rbf.forward(),
+            torch.nn.Linear(self.n, self.state_dim*3),
+            self.cosine_cutoff.forward()
+        )
+
+    
+        '''
         # Message passing networks
         self.message_net_dot = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim+self.edge_dim, self.state_dim),
@@ -33,6 +56,7 @@ class PAINN(torch.nn.Module):
         self.message_net_vector = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim+self.edge_dim, self.state_dim),
             torch.nn.Tanh())
+        '''
 
         # State output network
         self.output_net = torch.nn.Linear(
