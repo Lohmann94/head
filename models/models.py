@@ -44,7 +44,6 @@ class PAINN(torch.nn.Module):
             self.cosine_cutoff.forward()
         )
 
-    
         '''
         # Message passing networks
         self.message_net_dot = torch.nn.Sequential(
@@ -59,8 +58,11 @@ class PAINN(torch.nn.Module):
         '''
 
         # State output network
-        self.output_net = torch.nn.Linear(
-            self.state_dim, self.output_dim)
+        self.output_net = torch.nn.Sequential(
+            torch.nn.Linear(self.state_dim, self.state_dim),
+            torch.nn.SiLU(),
+            torch.nn.Linear(self.state_dim, self.output_dim),
+        )
 
     def forward(self, x):
         """Evaluate neural network on a batch of graphs.
@@ -87,17 +89,69 @@ class PAINN(torch.nn.Module):
         out : N x output_dim
             Neural network output
 
-        """
+
         # Initialize node features to zeros
         self.state = torch.zeros([x.num_nodes, self.state_dim])
 
         # Initialize edge vector features to zeros, change when two-dimensional problem
         self.state_vec = torch.zeros([x.num_nodes, 3, self.state_dim])
 
+        """
+
+        self.nbr_mask = torch.tensor(
+            [True if abs(value) > self.r_cut else False for value in x.edge_lengths])
+
         # Loop over message passing rounds
         for _ in range(self.num_message_passing_rounds):
-            # Input to message passing networks
-            inp = torch.cat((self.state[x.node_from], x.edge_lengths), 1)
+
+            for node in range(x.node_graph_index.shape[0]):
+
+                # Storing the graph of the current node
+                graph_i = x.node_graph_index[node]
+
+                # The indeces of edges connected with nodes belonging to graph_i
+                edge_slice = torch.where(x.node_from == node)[0]
+
+                # The ind
+                sub_nbr_mask = torch.index_select(self.nbr_mask, 0, edge_slice)
+
+                sub_edge_vector_diffs = x.edge_vector_diffs[edge_slice]
+
+                sub_node_from = x.node_from[edge_slice]
+
+                sub_node_to = x.node_to[edge_slice]
+
+                nbrs_cut_diffs = sub_edge_vector_diffs[sub_nbr_mask]
+
+                nbrs_node_from = sub_node_from[sub_nbr_mask]
+
+                nbrs_node_to = sub_node_to[sub_nbr_mask]
+
+                inp = self.state[nbrs_node_from]
+
+                phi_output = self.phi_net(inp)
+
+                filter_output = self.filter_net(nbrs_cut_diffs)
+
+                normalized = nbrs_cut_diffs / torch.norm(nbrs_cut_diffs)
+
+                phi_filter_hadamard_product = phi_output * filter_output
+
+                # Splitting of phi-filter product:
+                split_1 = phi_filter_hadamard_product[:, :self.state_dim]
+                split_2 = phi_filter_hadamard_product[:,
+                                                      self.state_dim:self.state_dim*2]
+                split_3 = phi_filter_hadamard_product[:, self.state_dim*2:]
+
+                state_vec_split_1_hadamard = self.state_vec[nbrs_node_from] * split_1
+                normalized_split_3_hadamard = normalized * split_3
+
+                # Sum of state_vec_split_1_hadamard and normalized_split_3_hadamard
+                sum_split_1_and_3 = state_vec_split_1_hadamard + normalized_split_3_hadamard
+
+                # sum over nbrs:
+                self.state.index_add_(0, nbrs_node_to, split_2)
+                self.state_vec.index_add_(0, nbrs_node_to, sum_split_1_and_3)
 
             # Compute dot and cross product
             dot_product = dot(
