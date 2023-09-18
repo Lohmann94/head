@@ -1,8 +1,8 @@
 import torch
-from data.processed.cross_coupling import datasets
-from rbf import RadialBasisFunction
-from f_cut import CosineCutoff
-
+from models.rbf import RadialBasisFunction
+from models.f_cut import CosineCutoff
+from models.U_layer import ULayer
+from models.V_layer import VLayer
 
 class PAINN(torch.nn.Module):
     """Translation and rotation invariant graph neural network.
@@ -17,7 +17,7 @@ class PAINN(torch.nn.Module):
 
     def __init__(self, output_dim=1, state_dim=128,
                  num_message_passing_rounds=3, r_cut=4, n=20,
-                 f_cut=2):
+                 f_cut=2, num_phys_dims=3):
         super().__init__()
 
         # Define dimensions and other hyperparameters
@@ -28,9 +28,7 @@ class PAINN(torch.nn.Module):
         self.r_cut = r_cut
         self.f_cut = f_cut
         self.n = n
-
-        self.rbf = RadialBasisFunction(self.n, self.r_cut)
-        self.cosine_cutoff = CosineCutoff(self.f_cut)
+        self.num_phys_dims = num_phys_dims
 
         self.phi_net = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim),
@@ -39,23 +37,27 @@ class PAINN(torch.nn.Module):
         )
 
         self.filter_net = torch.nn.Sequential(
-            self.rbf.forward(),
+            RadialBasisFunction(self.n, self.r_cut),
             torch.nn.Linear(self.n, self.state_dim*3),
-            self.cosine_cutoff.forward()
+            CosineCutoff(self.f_cut)
         )
 
-        '''
-        # Message passing networks
-        self.message_net_dot = torch.nn.Sequential(
-            torch.nn.Linear(self.state_dim+self.edge_dim, self.state_dim),
-            torch.nn.Tanh())
-        self.message_net_cross = torch.nn.Sequential(
-            torch.nn.Linear(self.state_dim+self.edge_dim, self.state_dim),
-            torch.nn.Tanh())
-        self.message_net_vector = torch.nn.Sequential(
-            torch.nn.Linear(self.state_dim+self.edge_dim, self.state_dim),
-            torch.nn.Tanh())
-        '''
+        #TODO spørg mikkel om dimensionerne her. Vektor: nbrs x num_phys_dimension x state_dim (128)
+        self.U_layer = torch.nn.Sequential(
+            ULayer((x.num_nodes, self.num_phys_dims, self.state_dim ), (x.num_nodes,self.num_phys_dims, self.state_dim)),
+        )
+
+        #TODO spørg mikkel om dimensionerne her. Vektor: nbrs x num_phys_dimension x state_dim (128)
+        self.V_layer = torch.nn.Sequential(
+            VLayer((x.num_nodes, self.num_phys_dims, self.state_dim ), (x.num_nodes,self.num_phys_dims, self.state_dim)),
+        )
+
+        # State output network
+        self.update_scalar = torch.nn.Sequential(
+            torch.nn.Linear(self.state_dim*2, self.state_dim),
+            torch.nn.SiLU(),
+            torch.nn.Linear(self.state_dim, self.output_dim*3),
+        )
 
         # State output network
         self.output_net = torch.nn.Sequential(
@@ -99,7 +101,14 @@ class PAINN(torch.nn.Module):
         """
 
         self.nbr_mask = torch.tensor(
-            [True if abs(value) > self.r_cut else False for value in x.edge_lengths])
+            [True if abs(value) <= self.r_cut else False for value in x.edge_lengths])
+
+
+        # Initialize node features to zeros
+        self.state = torch.zeros([x.num_nodes, self.state_dim])
+
+        # Initialize edge vector features to zeros, change when two-dimensional problem
+        self.state_vec = torch.zeros([x.num_nodes, self.num_phys_dims+8, self.state_dim])
 
         # Loop over message passing rounds
         for _ in range(self.num_message_passing_rounds):
@@ -127,47 +136,54 @@ class PAINN(torch.nn.Module):
 
                 nbrs_node_to = sub_node_to[sub_nbr_mask]
 
-                inp = self.state[nbrs_node_from]
+                input_tensor = self.state[nbrs_node_from]
 
-                phi_output = self.phi_net(inp)
-
+                phi_output = self.phi_net(input_tensor)
                 filter_output = self.filter_net(nbrs_cut_diffs)
 
-                normalized = nbrs_cut_diffs / torch.norm(nbrs_cut_diffs)
+                normalized = nbrs_cut_diffs / torch.tensor(torch.norm(nbrs_cut_diffs))
+                phi_filter_product = phi_output * filter_output
+                
+                message_split_1 = phi_filter_product[:, :self.state_dim]
+                message_split_2 = phi_filter_product[:, self.state_dim:self.state_dim*2]
+                message_split_3 = phi_filter_product[:, self.state_dim*2:]
+                
+                #TODO Spørg mikkel ift dimensionerne her 3 nbrs, 2 dimensioner, 128 state_dim og 3 nbrs x 128 state_dim
+                state_vec_split_1 = self.state_vec[nbrs_node_from] * message_split_1[:, None, :]
 
-                phi_filter_hadamard_product = phi_output * filter_output
-
-                # Splitting of phi-filter product:
-                split_1 = phi_filter_hadamard_product[:, :self.state_dim]
-                split_2 = phi_filter_hadamard_product[:,
-                                                      self.state_dim:self.state_dim*2]
-                split_3 = phi_filter_hadamard_product[:, self.state_dim*2:]
-
-                state_vec_split_1_hadamard = self.state_vec[nbrs_node_from] * split_1
-                normalized_split_3_hadamard = normalized * split_3
-
-                # Sum of state_vec_split_1_hadamard and normalized_split_3_hadamard
-                sum_split_1_and_3 = state_vec_split_1_hadamard + normalized_split_3_hadamard
+                #TODO Spørg mikkel ift dimensionerne her 3 nbrs, 2 koordinater og 3 nbrs x 128 state_dim
+                normalized_split_3 = normalized * message_split_3
+                
+                sum_split_1_and_3 = state_vec_split_1 + normalized_split_3
 
                 # sum over nbrs:
-                self.state.index_add_(0, nbrs_node_to, split_2)
+                self.state.index_add_(0, nbrs_node_to, message_split_2)
                 self.state_vec.index_add_(0, nbrs_node_to, sum_split_1_and_3)
 
-            # Compute dot and cross product
-            dot_product = dot(
-                self.state_vec[x.node_from], self.state_vec[x.node_to])
-            cross_product = cross(
-                self.state_vec[x.node_from], self.state_vec[x.node_to])
+                """
+                The Update block:
+                """
 
-            # Message networks
-            message = (self.message_net_dot(inp) * dot_product +
-                       self.message_net_cross(inp) * cross_product)
-            message_vec = (self.message_net_vector(inp)[:, None, :] *
-                           x.edge_vectors[:, :, None])
+                U_product = self.U_net(self.state_vec[nbrs_node_from])
 
-            # Aggregate: Sum messages
-            self.state.index_add_(0, x.node_to, message)
-            self.state_vec.index_add_(0, x.node_to, message_vec)
+                V_product = self.V_net(self.state_vec[nbrs_node_from])
+
+                UV_dot_product = torch.dot(U_product, V_product)
+
+                V_norm = torch.norm(V_product, dim=1)
+
+                combined_tensor = torch.cat([V_norm, self.state[nbrs_node_from]], dim=1)
+
+                scalar_pre_split = self.update_scalar(combined_tensor)
+
+                update_split_1 = scalar_pre_split[:, :self.state_dim]
+                update_split_2 = scalar_pre_split[:, self.state_dim:self.state_dim*2]
+                update_split_3 = scalar_pre_split[:, self.state_dim*2:]
+
+                #TODO: avv, asv, ass
+                # Aggregate: Sum messages
+                self.state.index_add_(0, x.node_to, message)
+                self.state_vec.index_add_(0, x.node_to, message_vec)
 
         # Aggretate: Sum node features
         self.graph_state = torch.zeros((x.num_graphs, self.state_dim))

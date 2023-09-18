@@ -11,17 +11,12 @@ class RadialBasisFunction(nn.Module):
 
     def forward(self, x):
         # Apply your custom function to the input
-        output = self.custom_function(x)
-        return output
-
-    def custom_function(self, x):
-
         values = torch.arange(1,self.n+1)
 
-        activations = torch.zeros(len(values))
+        output = torch.zeros(len(values))
 
         for integer in values:
 
-            activations[integer-1] = torch.sin(((integer*torch.pi)/self.r_cut)*torch.norm(x))/torch.norm(x)
+            output[integer-1] = torch.sin(((integer*torch.pi)/self.r_cut)*torch.norm(x))/torch.norm(x)
 
-        return activations
+        return output

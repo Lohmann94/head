@@ -3,28 +3,26 @@ from data.processed.cross_coupling import datasets
 import numpy as np
 from utillities.helper import Helper
 from models.rbf import RadialBasisFunction
+from models.f_cut import CosineCutoff
+from models.models import PAINN
+from data.processed.cross_coupling import datasets
 
+data = datasets.Cross_coupling_alllig2_test()
+data = datasets.Tetris()
 
-class MetaModel():
+# Network, loss function, and optimizer
+#net = GNNInvariant(output_dim=data.num_graphs, state_dim = 5)
+net = PAINN(num_phys_dims=2)
+loss_function = torch.nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(net.parameters(), lr=0.01)
 
-    def __init__(self, included_graphs=None, cutoff=5, rbf_n=20):
+epochs = 1000
+for epoch in range(epochs):
+    optimizer.zero_grad()
+    output = net(data)
+    loss = loss_function(output, data.graph_list)
+    loss.backward()
+    optimizer.step()
 
-        self.dataset = datasets.Cross_coupling_optimized_eom2Lig()
-        self.included_graphs = included_graphs
-        self.cutoff = cutoff
-        self.rbf_n = rbf_n
-        self.helper = Helper(self.dataset, self.cutoff, self.included_graphs)
-
-        graph_id = 0
-        node_i = 0
-
-        nbrs_i = self.helper.i_nbr(graph_id=graph_id, node_i=node_i, direction=False)
-
-
-        
-        
-
-
-
-if __name__ == "__main__":
-    meta_model = MetaModel(included_graphs=10, cutoff=10)
+    accuracy = (torch.argmax(output, 1) == data.graph_list).sum() / data.num_graphs
+    print(f'Epoch: {epoch}, Loss: {loss}, Accuracy: {accuracy}')
