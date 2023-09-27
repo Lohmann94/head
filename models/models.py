@@ -4,6 +4,7 @@ from models.f_cut import CosineCutoff
 from models.U_layer import ULayer
 from models.V_layer import VLayer
 
+
 class PAINN(torch.nn.Module):
     """Translation and rotation invariant graph neural network.
 
@@ -39,24 +40,13 @@ class PAINN(torch.nn.Module):
         self.filter_net = torch.nn.Sequential(
             RadialBasisFunction(self.n, self.r_cut),
             torch.nn.Linear(self.n, self.state_dim*3),
-            CosineCutoff(self.f_cut)
-        )
-
-        #TODO spørg mikkel om dimensionerne her. Vektor: nbrs x num_phys_dimension x state_dim (128)
-        self.U_layer = torch.nn.Sequential(
-            ULayer((x.num_nodes, self.num_phys_dims, self.state_dim ), (x.num_nodes,self.num_phys_dims, self.state_dim)),
-        )
-
-        #TODO spørg mikkel om dimensionerne her. Vektor: nbrs x num_phys_dimension x state_dim (128)
-        self.V_layer = torch.nn.Sequential(
-            VLayer((x.num_nodes, self.num_phys_dims, self.state_dim ), (x.num_nodes,self.num_phys_dims, self.state_dim)),
         )
 
         # State output network
         self.update_scalar = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim*2, self.state_dim),
             torch.nn.SiLU(),
-            torch.nn.Linear(self.state_dim, self.output_dim*3),
+            torch.nn.Linear(self.state_dim, self.state_dim*3),
         )
 
         # State output network
@@ -100,13 +90,23 @@ class PAINN(torch.nn.Module):
 
         """
 
+        # TODO Fiks at de er 128 x 128 (self.state_dim x self.state_dim)
+        self.U_layer = torch.nn.Sequential(
+            ULayer(self.state_dim, self.state_dim)
+        )
+
+        # TODO Fiks at de er 128 x 128 (self.state_dim x self.state_dim)
+        self.V_layer = torch.nn.Sequential(
+            VLayer(self.state_dim, self.state_dim)
+        )
+
+        self.f_cut = CosineCutoff(self.r_cut, self.num_phys_dims)
+
         self.nbr_mask = torch.tensor(
             [True if abs(value) <= self.r_cut else False for value in x.edge_lengths])
 
-
         # Initialize node features to embedding
-        # TODO: Fikse at det bliver initialiseret til en embedding 
-        # TODO: I PAINN embedder de på baggrund ac kerne-energier (Nuclear charges Z_i) Hvad embedder vi på baggrund af her?
+        # TODO: fiks tilfældig embedding med lookup table af tilfældige værdier ala torch.nn.Embedding
 
         """
         Eksempel på embedding:
@@ -132,118 +132,132 @@ class PAINN(torch.nn.Module):
         self.state = torch.zeros([x.num_nodes, self.state_dim])
 
         # Initialize edge vector features to zeros, change when two-dimensional problem
-        # TODO: Er det rigtigt forstået at det skal initialiseres til 3 for et 3d vektor rum
-        self.state_vec = torch.zeros([x.num_nodes, self.num_phys_dims, self.state_dim])
+        self.state_vec = torch.zeros(
+            [x.num_nodes, self.num_phys_dims, self.state_dim])
 
+
+        #TODO lav implementation hvor man gør det hele i ét pas i stedet for node for node
         # Loop over message passing rounds
         for _ in range(self.num_message_passing_rounds):
-
+            
             for node in range(x.node_graph_index.shape[0]):
 
                 # Storing the graph index of the current node
                 graph_i = x.node_graph_index[node]
-                
+
                 # The indices of edges connected with node belonging to graph_i
                 edge_slice = torch.where(x.node_from == node)[0]
-                
+
                 # Mask of indeces related to edges for node, with length < r_cut
                 sub_nbr_mask = torch.index_select(self.nbr_mask, 0, edge_slice)
-                
+
                 # Getting the edge vector differences (i,j) for the selected edges
                 sub_edge_vector_diffs = x.edge_vector_diffs[edge_slice]
-                
+
                 # Getting the 'from' nodes for the selected edges
                 sub_node_from = x.node_from[edge_slice]
-                
+
                 # Getting the 'to' nodes for the selected edges
                 sub_node_to = x.node_to[edge_slice]
-                
+
                 # Filtering the edge vector differences based on the sub_nbr_mask
                 nbrs_cut_diffs = sub_edge_vector_diffs[sub_nbr_mask]
-                
+
                 # Filtering the 'from' nodes based on the sub_nbr_mask
                 nbrs_node_from = sub_node_from[sub_nbr_mask]
-                
+
                 # Filtering the 'to' nodes based on the sub_nbr_mask
                 nbrs_node_to = sub_node_to[sub_nbr_mask]
-                
+
                 # Getting the input tensor for the phi_net
                 input_tensor = self.state[nbrs_node_from]
-                
+
                 # Applying the phi_net to the input tensor
                 phi_output = self.phi_net(input_tensor)
-                
+
                 # Applying the filter_net to the edge vector differences
                 filter_output = self.filter_net(nbrs_cut_diffs)
-                
+
+                W_output = self.f_cut(filter_output, nbrs_cut_diffs)
+
                 # Normalizing the edge vector differences
-                normalized = nbrs_cut_diffs / torch.tensor(torch.norm(nbrs_cut_diffs))
-                
+                normalized = nbrs_cut_diffs / \
+                    torch.tensor(torch.norm(nbrs_cut_diffs))
+
+                normalized_expanded = normalized.repeat(1,self.state_dim)[:,:self.state_dim]
+
                 # Calculating the element-wise product of phi_output and filter_output
-                phi_filter_product = phi_output * filter_output
-                
+                phi_filter_product = phi_output * W_output
+
                 # Splitting the phi_filter_product into three parts
                 message_split_1 = phi_filter_product[:, :self.state_dim]
-                message_split_2 = phi_filter_product[:, self.state_dim:self.state_dim*2]
+                message_split_2 = phi_filter_product[:,
+                                                     self.state_dim:self.state_dim*2]
                 message_split_3 = phi_filter_product[:, self.state_dim*2:]
-                
-                #TODO Spørg mikkel ift dimensionerne her 3 nbrs, 2 dimensioner, 128 state_dim og 3 nbrs x 128 state_dim
-                state_vec_split_1 = self.state_vec[nbrs_node_from] * message_split_1[:, None, :]
 
-                #TODO Spørg mikkel ift dimensionerne her 3 nbrs, 2 koordinater og 3 nbrs x 128 state_dim
-                normalized_split_3 = normalized * message_split_3
-                
-                sum_split_1_and_3 = state_vec_split_1 + normalized_split_3
-                
+                state_vec_split_1 = self.state_vec[nbrs_node_from] * \
+                    message_split_1[:, None, :]
+
+                normalized_split_3 = normalized_expanded * message_split_3
+
+                sum_split_1_and_3 = state_vec_split_1 + normalized_split_3[:, None, :]
+
+                #Fiks at der bliver summet for alle neighboors og at der bliver gemt i self.state
+                v_sum_j = torch.sum(sum_split_1_and_3, dim=0)
+
+                s_sum_j = torch.sum(message_split_2, dim=0)
                 # Summing over neighbors and updating self.state
-                self.state.index_add_(0, nbrs_node_to, message_split_2)
-                
+                self.state[node] = s_sum_j
                 # Summing sum_split_1_and_3 over neighbors and updating self.state_vec
-                self.state_vec.index_add_(0, nbrs_node_to, sum_split_1_and_3)
+                self.state_vec[node] = v_sum_j
 
                 """
                 The Update block:
                 """
-
+                #TODO fiks at det kun er v_i og s_i som bliver opdateret i denne blok
                 # Compute U_product using U_net on state_vec[nbrs_node_from]
-                U_product = self.U_net(self.state_vec[nbrs_node_from])
-                
+                U_product = self.U_layer(self.state_vec[node])
+
                 # Compute V_product using V_net on state_vec[nbrs_node_from]
-                V_product = self.V_net(self.state_vec[nbrs_node_from])
-                
+                V_product = self.V_layer(self.state_vec[node])
+
+                #TODO lav prik
                 # Compute the dot product of U_product and V_product
-                UV_dot_product = torch.dot(U_product, V_product)
-                
+                UV_product = torch.matmul(U_product, V_product.t())
+
                 # Compute the L2 norm of V_product along dimension 1
-                V_norm = torch.norm(V_product, dim=1)
-                
+                V_norm = torch.norm(V_product, dim=0)
+
                 # Concatenate V_norm and self.state[nbrs_node_from] along dimension 1
-                combined_tensor = torch.cat([V_norm, self.state[nbrs_node_from]], dim=1)
-                
+                combined_tensor = torch.cat(
+                    [V_norm, self.state[node]])
+
                 # Compute scalar_pre_split using update_scalar on combined_tensor
-                scalar_pre_split = self.update_scalar(combined_tensor)
-                
+                a = self.update_scalar(combined_tensor)
+
                 # Split scalar_pre_split into a_vv, a_sv, and a_ss
-                a_vv = scalar_pre_split[:, :self.state_dim]
-                a_sv = scalar_pre_split[:, self.state_dim:self.state_dim*2]
-                a_ss = scalar_pre_split[:, self.state_dim*2:]
+                a_vv = a[:self.state_dim]
+                a_sv = a[self.state_dim:self.state_dim*2]
+                a_ss = a[self.state_dim*2:]
 
-                # Multiply U_product matrix with update_split_1 matrix
-                U_product_split_1 = U_product[:, :self.state_dim] * update_split_1[:, None, :]
-                
+                # Multiply U_product matrix with a_vv matrix
+                U_product_a_vv = U_product * a_vv
+
                 # Multiply UV_dot_product matrix with update_split_2 matrix
-                UV_dot_product_split_2 = UV_dot_product[:, :self.state_dim] * update_split_2[:, None, :]
+                UV_dot_product_a_sv = torch.sum(UV_product, dim=0).repeat(self.state_dim)[:self.state_dim] * a_sv
 
+                sum_a_sv_a_ss = a_ss + a_sv
+                                                
                 # Aggregate: Sum messages
-                self.state.index_add_(0, x.node_to, message)
-                self.state_vec.index_add_(0, x.node_to, message_vec)
+                self.state[node] = sum_a_sv_a_ss
+                self.state_vec[node] = U_product_a_vv
 
         # Aggretate: Sum node features
         self.graph_state = torch.zeros((x.num_graphs, self.state_dim))
         self.graph_state.index_add_(0, x.node_graph_index, self.state)
 
         # Output
-        out = self.output_net(self.graph_state)
+        out = self.output_net(self.graph_state).flatten()
         return out
 
 
