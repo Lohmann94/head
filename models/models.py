@@ -17,8 +17,8 @@ class PAINN(torch.nn.Module):
     """
 
     def __init__(self, output_dim=1, state_dim=128,
-                 num_message_passing_rounds=3, r_cut=4, n=20,
-                 f_cut=2, num_phys_dims=3):
+                 num_message_passing_rounds=1, r_cut=10, n=20,
+                 num_phys_dims=3):
         super().__init__()
 
         # Define dimensions and other hyperparameters
@@ -27,7 +27,6 @@ class PAINN(torch.nn.Module):
         self.output_dim = output_dim
         self.num_message_passing_rounds = num_message_passing_rounds
         self.r_cut = r_cut
-        self.f_cut = f_cut
         self.n = n
         self.num_phys_dims = num_phys_dims
 
@@ -129,7 +128,13 @@ class PAINN(torch.nn.Module):
         # Print the shape of the embedded output
         print(embedded_output.shape)
         """
+
+        self.embedding = torch.nn.Embedding(x.num_nodes, self.state_dim)
+
         self.state = torch.zeros([x.num_nodes, self.state_dim])
+
+        #TODO spørg Mikkel om embedding er rigtig eller ikke
+        self.state = torch.sum(self.embedding(self.state.long()),dim=1)
 
         # Initialize edge vector features to zeros, change when two-dimensional problem
         self.state_vec = torch.zeros(
@@ -141,9 +146,6 @@ class PAINN(torch.nn.Module):
         for _ in range(self.num_message_passing_rounds):
             
             for node in range(x.node_graph_index.shape[0]):
-
-                # Storing the graph index of the current node
-                graph_i = x.node_graph_index[node]
 
                 # The indices of edges connected with node belonging to graph_i
                 edge_slice = torch.where(x.node_from == node)[0]
@@ -168,6 +170,13 @@ class PAINN(torch.nn.Module):
 
                 # Filtering the 'to' nodes based on the sub_nbr_mask
                 nbrs_node_to = sub_node_to[sub_nbr_mask]
+
+                """
+
+                The message block:
+
+                """
+                #TODO M-generel: phi og filter outputter meget små eller store værdier kan man rette det til?
 
                 # Getting the input tensor for the phi_net
                 input_tensor = self.state[nbrs_node_from]
@@ -195,34 +204,37 @@ class PAINN(torch.nn.Module):
                                                      self.state_dim:self.state_dim*2]
                 message_split_3 = phi_filter_product[:, self.state_dim*2:]
 
+                #TODO spørg mikkel om summering er rigtig
                 state_vec_split_1 = self.state_vec[nbrs_node_from] * \
                     message_split_1[:, None, :]
 
                 normalized_split_3 = normalized_expanded * message_split_3
 
+                #TODO spørg mikkel om summering er rigtig
                 sum_split_1_and_3 = state_vec_split_1 + normalized_split_3[:, None, :]
 
-                #Fiks at der bliver summet for alle neighboors og at der bliver gemt i self.state
+                #Sum for j
                 v_sum_j = torch.sum(sum_split_1_and_3, dim=0)
-
                 s_sum_j = torch.sum(message_split_2, dim=0)
+
                 # Summing over neighbors and updating self.state
                 self.state[node] = s_sum_j
                 # Summing sum_split_1_and_3 over neighbors and updating self.state_vec
                 self.state_vec[node] = v_sum_j
 
                 """
+
                 The Update block:
+
                 """
-                #TODO fiks at det kun er v_i og s_i som bliver opdateret i denne blok
                 # Compute U_product using U_net on state_vec[nbrs_node_from]
                 U_product = self.U_layer(self.state_vec[node])
 
                 # Compute V_product using V_net on state_vec[nbrs_node_from]
                 V_product = self.V_layer(self.state_vec[node])
 
-                #TODO lav prik
                 # Compute the dot product of U_product and V_product
+                #TODO spørg mikkel om produkt er rigtigt
                 UV_product = torch.matmul(U_product, V_product.t())
 
                 # Compute the L2 norm of V_product along dimension 1
@@ -244,9 +256,10 @@ class PAINN(torch.nn.Module):
                 U_product_a_vv = U_product * a_vv
 
                 # Multiply UV_dot_product matrix with update_split_2 matrix
+                #TODO spørg mikkel om repeating er rigtig
                 UV_dot_product_a_sv = torch.sum(UV_product, dim=0).repeat(self.state_dim)[:self.state_dim] * a_sv
 
-                sum_a_sv_a_ss = a_ss + a_sv
+                sum_a_sv_a_ss = a_ss + UV_dot_product_a_sv
                                                 
                 # Aggregate: Sum messages
                 self.state[node] = sum_a_sv_a_ss
