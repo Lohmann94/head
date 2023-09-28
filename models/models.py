@@ -105,30 +105,7 @@ class PAINN(torch.nn.Module):
             [True if abs(value) <= self.r_cut else False for value in x.edge_lengths])
 
         # Initialize node features to embedding
-        # TODO: fiks tilfældig embedding med lookup table af tilfældige værdier ala torch.nn.Embedding
-
-        """
-        Eksempel på embedding:
-
-        import torch
-
-        # Define the vocabulary size and embedding dimension
-        vocab_size = 100
-        embedding_dim = 50
-
-        # Create an instance of the Embedding layer
-        embedding = torch.nn.Embedding(vocab_size, embedding_dim)
-
-        # Generate some random input indices
-        input_indices = torch.tensor([[1, 2, 3], [4, 5, 6]])
-
-        # Pass the input indices through the Embedding layer
-        embedded_output = embedding(input_indices)
-
-        # Print the shape of the embedded output
-        print(embedded_output.shape)
-        """
-
+        #For hver species atomtype skal der være én repræsentation
         self.embedding = torch.nn.Embedding(x.num_nodes, self.state_dim)
 
         self.state = torch.zeros([x.num_nodes, self.state_dim])
@@ -149,7 +126,8 @@ class PAINN(torch.nn.Module):
 
                 # The indices of edges connected with node belonging to graph_i
                 edge_slice = torch.where(x.node_from == node)[0]
-
+                
+                #TODO kig igennem om vi får alle connections med her og ikke bare den ene
                 # Mask of indeces related to edges for node, with length < r_cut
                 sub_nbr_mask = torch.index_select(self.nbr_mask, 0, edge_slice)
 
@@ -168,9 +146,6 @@ class PAINN(torch.nn.Module):
                 # Filtering the 'from' nodes based on the sub_nbr_mask
                 nbrs_node_from = sub_node_from[sub_nbr_mask]
 
-                # Filtering the 'to' nodes based on the sub_nbr_mask
-                nbrs_node_to = sub_node_to[sub_nbr_mask]
-
                 """
 
                 The message block:
@@ -179,19 +154,21 @@ class PAINN(torch.nn.Module):
                 #TODO M-generel: phi og filter outputter meget små eller store værdier kan man rette det til?
 
                 # Getting the input tensor for the phi_net
+                #TODO fiks at vi tager den første index repræsentation j gange i stedet for de reelle repræsentationer
                 input_tensor = self.state[nbrs_node_from]
 
                 # Applying the phi_net to the input tensor
                 phi_output = self.phi_net(input_tensor)
 
                 # Applying the filter_net to the edge vector differences
+                #TODO j x 384
                 filter_output = self.filter_net(nbrs_cut_diffs)
 
                 W_output = self.f_cut(filter_output, nbrs_cut_diffs)
 
                 # Normalizing the edge vector differences
                 normalized = nbrs_cut_diffs / \
-                    torch.tensor(torch.norm(nbrs_cut_diffs))
+                    torch.tensor(torch.norm(nbrs_cut_diffs, dim=1, keepdim=True))
 
                 normalized_expanded = normalized.repeat(1,self.state_dim)[:,:self.state_dim]
 
@@ -208,19 +185,20 @@ class PAINN(torch.nn.Module):
                 state_vec_split_1 = self.state_vec[nbrs_node_from] * \
                     message_split_1[:, None, :]
 
-                normalized_split_3 = normalized_expanded * message_split_3
+
+                normalized_split_3 = normalized[:, :, None] * message_split_3[:, None, :]
 
                 #TODO spørg mikkel om summering er rigtig
-                sum_split_1_and_3 = state_vec_split_1 + normalized_split_3[:, None, :]
+                sum_split_1_and_3 = state_vec_split_1 + normalized_split_3
 
                 #Sum for j
                 v_sum_j = torch.sum(sum_split_1_and_3, dim=0)
                 s_sum_j = torch.sum(message_split_2, dim=0)
 
                 # Summing over neighbors and updating self.state
-                self.state[node] = s_sum_j
+                self.state[node] += s_sum_j
                 # Summing sum_split_1_and_3 over neighbors and updating self.state_vec
-                self.state_vec[node] = v_sum_j
+                self.state_vec[node] += v_sum_j
 
                 """
 
@@ -235,7 +213,10 @@ class PAINN(torch.nn.Module):
 
                 # Compute the dot product of U_product and V_product
                 #TODO spørg mikkel om produkt er rigtigt
-                UV_product = torch.matmul(U_product, V_product.t())
+                #TODO parvist prikprodukt
+                #UV_product = torch.matmul(U_product, V_product.t())
+
+                UV_product = torch.sum(U_product * V_product, dim=0)
 
                 # Compute the L2 norm of V_product along dimension 1
                 V_norm = torch.norm(V_product, dim=0)
@@ -257,13 +238,13 @@ class PAINN(torch.nn.Module):
 
                 # Multiply UV_dot_product matrix with update_split_2 matrix
                 #TODO spørg mikkel om repeating er rigtig
-                UV_dot_product_a_sv = torch.sum(UV_product, dim=0).repeat(self.state_dim)[:self.state_dim] * a_sv
+                UV_dot_product_a_sv = UV_product * a_sv
 
                 sum_a_sv_a_ss = a_ss + UV_dot_product_a_sv
                                                 
                 # Aggregate: Sum messages
-                self.state[node] = sum_a_sv_a_ss
-                self.state_vec[node] = U_product_a_vv
+                self.state[node] += sum_a_sv_a_ss
+                self.state_vec[node] += U_product_a_vv
 
         # Aggretate: Sum node features
         self.graph_state = torch.zeros((x.num_graphs, self.state_dim))

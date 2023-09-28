@@ -13,10 +13,13 @@ class RadialBasisFunction(nn.Module):
         # Apply your custom function to the input
         values = torch.arange(1,self.n+1)
 
-        output = torch.zeros(len(values))
+        output = torch.zeros(x.shape[0],len(values))
 
-        for integer in values:
+        for i in range(x.shape[0]):
 
-            output[integer-1] = torch.sin(((integer*torch.pi)/self.r_cut)*torch.norm(x))/torch.norm(x)
+            for integer in values:
+
+                output[i][integer - 1] = torch.sin(((integer*torch.pi)/self.r_cut)*torch.norm(x[i]))/torch.norm(x[i])
+
 
         return output

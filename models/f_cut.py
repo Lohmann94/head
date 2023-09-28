@@ -11,7 +11,8 @@ class CosineCutoff(nn.Module):
 
     def forward(self, x, r_ij):
         #TODO spørg mikkel om måden at gange r_ij på er rigtig
-        output = 0.5 * (torch.cos((torch.pi * x) / self.r_cut) + 1) * sum(r_ij).repeat(int(384/self.num_phys_dims))
+        #regn længden af vektorerne, og skal ind på x's plads
+        output = 0.5 * (torch.cos((torch.pi * torch.norm(r_ij, dim=1, keepdim=True)) / self.r_cut) + 1) * x
         return output
 
         
