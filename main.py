@@ -4,12 +4,14 @@ import numpy as np
 from utillities.helper import Helper
 from models.rbf import RadialBasisFunction
 from models.f_cut import CosineCutoff
-from models.models import PAINN
+from models.models import PAINN, PAINN_2
 from data.processed.cross_coupling import datasets
 from tqdm import tqdm
 import os
 
-train_data = datasets.Cross_coupling_optimized_eom2Lig(start_index=0, end_index=5)
+#os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+
+train_data = datasets.Cross_coupling_optimized_eom2Lig(start_index=0, end_index=2)
 val_data = datasets.Cross_coupling_optimized_eom2Lig(start_index=5, end_index=7)
 test_data = datasets.Cross_coupling_optimized_eom2Lig(start_index=7, end_index=9)
 #data = datasets.Tetris()
@@ -24,14 +26,16 @@ else:
 
 # Network, loss function, and optimizer
 #net = GNNInvariant(output_dim=data.num_graphs, state_dim = 5)
-net = PAINN(num_phys_dims=3, num_message_passing_rounds=5, r_cut=4)
+net = PAINN_2(num_phys_dims=3, num_message_passing_rounds=5, r_cut=4)
 net.to(device)
 loss_function = torch.nn.MSELoss()
 val_loss_function = torch.nn.MSELoss()
 #loss_function = torch.nn.L1Loss()
-optimizer = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=0.01)
+optimizer = torch.optim.Adam(net.parameters(), lr=0.0001, weight_decay=0.01)
 
-epochs = 100
+epochs = 1000
+
+#TODO spørg: Hvorfor driller modellen når man prøver at smide et andet datasæt i?
 for epoch in range(epochs):
     optimizer.zero_grad()
     output = net(train_data)
