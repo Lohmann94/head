@@ -19,7 +19,7 @@ class PAINN(torch.nn.Module):
 
     def __init__(self, output_dim=1, state_dim=128,
                  num_message_passing_rounds=1, r_cut=10, n=20,
-                 num_phys_dims=3, device='cpu'):
+                 num_phys_dims=3):
         super().__init__()
 
         # Define dimensions and other hyperparameters
@@ -30,18 +30,17 @@ class PAINN(torch.nn.Module):
         self.r_cut = r_cut
         self.n = n
         self.num_phys_dims = num_phys_dims
-        self.device = device
 
         self.phi_net = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim),
             torch.nn.SiLU(),
             torch.nn.Linear(self.state_dim, self.state_dim*3),
-        ).to(self.device)
+        )
 
         self.filter_net = torch.nn.Sequential(
             RadialBasisFunction(self.n, self.r_cut),
             torch.nn.Linear(self.n, self.state_dim*3),
-        ).to(self.device)
+        )
         
 
         # State output network
@@ -49,22 +48,22 @@ class PAINN(torch.nn.Module):
             torch.nn.Linear(self.state_dim*2, self.state_dim),
             torch.nn.SiLU(),
             torch.nn.Linear(self.state_dim, self.state_dim*3),
-        ).to(self.device)
+        )
 
         # State output network
         self.output_net = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim),
             torch.nn.SiLU(),
             torch.nn.Linear(self.state_dim, self.output_dim),
-        ).to(self.device)
+        )
 
         self.U_layer = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim, bias=False)
-        ).to(self.device)
+        )
 
         self.V_layer = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim, bias=False)
-        ).to(self.device)
+        )
 
         self.f_cut = CosineCutoff(self.r_cut, self.num_phys_dims)
 
@@ -89,51 +88,27 @@ class PAINN(torch.nn.Module):
             edge_vectors : torch.tensor (E x 2)
                 Edge vector features
 
-        Returns
-        -------
-        out : N x output_dim
-            Neural network output
-
-
-        # Initialize node features to zeros
-        self.state = torch.zeros([x.num_nodes, self.state_dim])
-
-        # Initialize edge vector features to zeros, change when two-dimensional problem
-        self.state_vec = torch.zeros([x.num_nodes, 3, self.state_dim])
-
         """
 
-        '''
-
-        self.U_layer = torch.nn.Sequential(
-            ULayer(self.state_dim, self.state_dim)
-        )
-
-        self.V_layer = torch.nn.Sequential(
-            VLayer(self.state_dim, self.state_dim)
-        )
-
-        '''
-
         self.nbr_mask = torch.tensor(
-            [index if abs(value) <= self.r_cut else -1 for index, value in enumerate(x.edge_lengths)], device=self.device)
+            [index if abs(value) <= self.r_cut else -1 for index, value in enumerate(x.edge_lengths)])
 
         # Initialize node features to embedding
         self.embedding = torch.nn.Embedding(
-            len(x.unique_atoms), self.state_dim, device=self.device)
+            len(x.unique_atoms), self.state_dim)
 
-        self.state = torch.zeros([x.num_nodes, self.state_dim], device=self.device)
+        self.state = torch.zeros([x.num_nodes, self.state_dim])
 
-        node_graph_index = x.node_graph_index.to(self.device)
+        node_graph_index = x.node_graph_index
 
         #TODO embedding er fikset, kører igennem hele state som init
         for node in range(node_graph_index.shape[0]):
             self.state[node] = self.embedding(
-                torch.tensor(x.atom_to_number[x.node_atoms[node]], device=self.device))
+                torch.tensor(x.atom_to_number[x.node_atoms[node]]))
 
         # Initialize edge vector features to zeros, change when two-dimensional problem
         self.state_vec = torch.zeros(
-            [x.num_nodes, self.num_phys_dims, self.state_dim], device=self.device)
+            [x.num_nodes, self.num_phys_dims, self.state_dim])
 
         # TODO lav implementation hvor man gør det hele i ét pas i stedet for node for node
         # Loop over message passing rounds
@@ -150,26 +125,20 @@ class PAINN(torch.nn.Module):
                 #TODO slices er fikset, directions er anderledes afhængig af om det er to eller from
                 #TODO Det skal være x.node_to
                 edge_slice = torch.where(x.node_from == node)[0]
-                edge_slice = edge_slice.to(self.device)
 
                 nbr_i_nodes = torch.tensor(
                     [x.edge_list[value][1] for value in edge_slice if value in self.nbr_mask])
-                nbr_i_nodes = nbr_i_nodes.to(self.device)
 
                 nbr_i_edges = torch.tensor(
                     [value for value in edge_slice if value in self.nbr_mask])
-                nbr_i_edges = nbr_i_edges.to(self.device)
 
                 # Mask of indeces related to edges for node, with length < r_cut
                 nbr_i_states = self.state[nbr_i_nodes]
-                nbr_i_states = nbr_i_states.to(self.device)
 
                 edge_vector_diffs = x.edge_vector_diffs.clone().detach()
-                edge_vector_diffs = edge_vector_diffs.to(self.device)
 
                 # Getting the edge vector differences (i,j) for the selected edges
                 nbrs_cut_diffs = edge_vector_diffs[nbr_i_edges]
-                nbrs_cut_diffs = nbrs_cut_diffs.to(self.device)
 
                 """
 
@@ -258,9 +227,9 @@ class PAINN(torch.nn.Module):
                 self.state_vec[node] += U_product_a_vv
 
         # Aggretate: Sum node features
-        self.graph_state = torch.zeros((x.num_graphs, self.state_dim)).to(self.device)
+        self.graph_state = torch.zeros((x.num_graphs, self.state_dim))
         #TODO fiks a node graph index skal være 0,1,2 osv. 
-        self.graph_state.index_add_(0, x.node_graph_index.to(self.device), self.state)
+        self.graph_state.index_add_(0, x.node_graph_index, self.state)
 
         # Output
         out = self.output_net(self.graph_state).flatten()
@@ -279,7 +248,7 @@ class PAINN_2(torch.nn.Module):
 
     def __init__(self, output_dim=1, state_dim=128,
                  num_message_passing_rounds=1, r_cut=10, n=20,
-                 num_phys_dims=3, device='cpu'):
+                 num_phys_dims=3):
         super().__init__()
 
         # Define dimensions and other hyperparameters
@@ -290,18 +259,17 @@ class PAINN_2(torch.nn.Module):
         self.r_cut = r_cut
         self.n = n
         self.num_phys_dims = num_phys_dims
-        self.device = device
 
         self.phi_net = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim),
             torch.nn.SiLU(),
             torch.nn.Linear(self.state_dim, self.state_dim*3),
-        ).to(self.device)
+        )
 
         self.filter_net = torch.nn.Sequential(
-            RadialBasisFunction(self.n, self.r_cut, self.device),
+            RadialBasisFunction(self.n, self.r_cut),
             torch.nn.Linear(self.n, self.state_dim*3),
-        ).to(self.device)
+        )
         
 
         # State output network
@@ -309,22 +277,22 @@ class PAINN_2(torch.nn.Module):
             torch.nn.Linear(self.state_dim*2, self.state_dim),
             torch.nn.SiLU(),
             torch.nn.Linear(self.state_dim, self.state_dim*3),
-        ).to(self.device)
+        )
 
         # State output network
         self.output_net = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim),
             torch.nn.SiLU(),
             torch.nn.Linear(self.state_dim, self.output_dim),
-        ).to(self.device)
+        )
 
         self.U_layer = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim, bias=False)
-        ).to(self.device)
+        )
 
         self.V_layer = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim, bias=False)
-        ).to(self.device)
+        )
 
         self.f_cut = CosineCutoff(self.r_cut, self.num_phys_dims)
 
@@ -376,24 +344,24 @@ class PAINN_2(torch.nn.Module):
         '''
 
         self.nbr_mask = torch.tensor(
-            [index if abs(value) <= self.r_cut else -1 for index, value in enumerate(x.edge_lengths)], device=self.device)
+            [index if abs(value) <= self.r_cut else -1 for index, value in enumerate(x.edge_lengths)])
 
         # Initialize node features to embedding
         self.embedding = torch.nn.Embedding(
-            len(x.unique_atoms), self.state_dim, device=self.device)
+            len(x.unique_atoms), self.state_dim)
 
-        self.state = torch.zeros([x.num_nodes, self.state_dim], device=self.device)
+        self.state = torch.zeros([x.num_nodes, self.state_dim])
 
-        node_graph_index = x.node_graph_index.to(self.device)
+        node_graph_index = x.node_graph_index
 
         #TODO embedding er fikset, kører igennem hele state som init
         for node in range(node_graph_index.shape[0]):
             self.state[node] = self.embedding(
-                torch.tensor(x.atom_to_number[x.node_atoms[node]], device=self.device))
+                torch.tensor(x.atom_to_number[x.node_atoms[node]]))
 
         # Initialize edge vector features to zeros, change when two-dimensional problem
         self.state_vec = torch.zeros(
-            [x.num_nodes, self.num_phys_dims, self.state_dim], device=self.device)
+            [x.num_nodes, self.num_phys_dims, self.state_dim])
 
         # TODO lav implementation hvor man gør det hele i ét pas i stedet for node for node
         # Loop over message passing rounds
@@ -412,12 +380,12 @@ class PAINN_2(torch.nn.Module):
 
             filter_output = self.filter_net(x.edge_vector_diffs)
 
-            W_output = self.f_cut(filter_output, x.edge_vector_diffs.to(self.device))
+            W_output = self.f_cut(filter_output, x.edge_vector_diffs)
 
             normalized = x.edge_vector_diffs / \
                     torch.norm(x.edge_vector_diffs, dim=1, keepdim=True)
 
-            phi_filter_product = phi_output * W_output
+            phi_filter_product = torch.mul(phi_output, W_output)
 
             # Splitting the phi_filter_product into three parts
             message_split_1 = phi_filter_product[:, :self.state_dim]
@@ -425,16 +393,15 @@ class PAINN_2(torch.nn.Module):
                                                      self.state_dim:self.state_dim*2]
             message_split_3 = phi_filter_product[:, self.state_dim*2:]
 
-            state_vec_split_1 = self.state_vec[x.node_from] * \
-                    message_split_1[:, None, :]
+            state_vec_split_1 = torch.mul(self.state_vec[x.node_from], message_split_1[:, None, :])
 
-            normalized_split_3 = normalized.to(self.device)[:, :,
-                                                None] * message_split_3[:, None, :]
+            normalized_split_3 = torch.mul(normalized[:, :,
+                                                None], message_split_3[:, None, :])
 
-            sum_split_1_and_3 = state_vec_split_1 + normalized_split_3
+            sum_split_1_and_3 = torch.add(state_vec_split_1, normalized_split_3)
 
-            self.state.index_add_(0, x.node_to.to(self.device), message_split_2)
-            self.state_vec.index_add_(0, x.node_to.to(self.device), sum_split_1_and_3)
+            self.state.index_add_(0, x.node_to, message_split_2)
+            self.state_vec.index_add_(0, x.node_to, sum_split_1_and_3)
 
             '''
             
@@ -468,25 +435,25 @@ class PAINN_2(torch.nn.Module):
             a_ss = a[:,self.state_dim*2:]
 
             # Multiply U_product matrix with a_vv matrix
-            U_product_a_vv = U_product * \
-                    a_vv[:, None, :]
+            U_product_a_vv = torch.mul(U_product,
+                    a_vv[:, None, :])
 
             # Multiply UV_dot_product matrix with update_split_2 matrix
-            UV_product_a_sv = UV_product * a_sv
+            UV_product_a_sv = torch.mul(UV_product, a_sv)
 
-            sum_a_sv_a_ss = a_ss + UV_product_a_sv
+            sum_a_sv_a_ss = torch.add(a_ss, UV_product_a_sv)
 
             # Aggregate: Sum messages
-            self.state += sum_a_sv_a_ss
-            self.state_vec += U_product_a_vv
+            self.state.add_(sum_a_sv_a_ss)
+            self.state_vec.add_(U_product_a_vv)
 
         # Aggretate: Sum node features
 
         #Index aligned in case data split starts at non zero index:
         index_aligned = x.node_graph_index - x.node_graph_index[0]
 
-        self.graph_state = torch.zeros((x.num_graphs, self.state_dim)).to(self.device)
-        self.graph_state.index_add_(0, index_aligned.to(self.device), self.state)
+        self.graph_state = torch.zeros((x.num_graphs, self.state_dim))
+        self.graph_state.index_add_(0, index_aligned, self.state)
 
         # Output
         out = self.output_net(self.graph_state)

@@ -4,11 +4,10 @@ import torch.nn.functional as F
 
 
 class RadialBasisFunction(nn.Module):
-    def __init__(self, n=20, r_cut=20, device='cpu'):
+    def __init__(self, n=20, r_cut=20):
         super(RadialBasisFunction, self).__init__()
         self.n = n
         self.r_cut = r_cut
-        self.device = device
 
 
     def forward(self, x):
@@ -16,8 +15,6 @@ class RadialBasisFunction(nn.Module):
         values = torch.arange(1,self.n+1)
 
         output = torch.zeros(x.shape[0],len(values))
-        output = output.to(self.device)
-        
 
         for i in range(x.shape[0]):
 
