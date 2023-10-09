@@ -24,16 +24,21 @@ else:
     print("GPU is not available.")
     device = torch.device("cpu")
 
+#Manually set device:
+device = torch.device("cpu")
+
 # Network, loss function, and optimizer
 #net = GNNInvariant(output_dim=data.num_graphs, state_dim = 5)
-net = PAINN_2(num_phys_dims=3, num_message_passing_rounds=5, r_cut=4)
+#TODO fiks at r_cut fungerer på painn2
+#TODO check at loss bliver evalueret rigtigt på targets, i og med at vi flattener output
+
+net = PAINN_2(num_phys_dims=3, num_message_passing_rounds=5, r_cut=4, device=device)
 net.to(device)
 loss_function = torch.nn.MSELoss()
-val_loss_function = torch.nn.MSELoss()
 #loss_function = torch.nn.L1Loss()
-optimizer = torch.optim.Adam(net.parameters(), lr=0.0001, weight_decay=0.01)
+optimizer = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=0.01)
 
-epochs = 1000
+epochs = 100
 
 #TODO spørg: Hvorfor driller modellen når man prøver at smide et andet datasæt i?
 for epoch in range(epochs):
@@ -43,24 +48,31 @@ for epoch in range(epochs):
     loss.backward()
     optimizer.step()
 
+    if epoch % 5 == 0:
+        print(f'Calculating Validation Loss:')
+        net.eval()
+        with torch.no_grad():
+            total_loss = 0
+            val_output = net(val_data)
+            val_loss = loss_function(val_output, val_data.targets.to(device))
+            total_loss += val_loss
+            print(f'Validation loss at epoch {epoch}: {val_loss}')
+            # Compute and report the average validation loss
+            if epoch != 0:
+                average_loss = total_loss // epoch
+                print(f'Average Validation Loss: {average_loss}')
+        net.train()
+
     
     #TODO validation loop
 
     print(f'Epoch: {epoch}, Loss: {loss}, MSE: {loss.item()}')
-'''
-optimizer.zero_grad()
-total_loss = 0
-val_output = net(val_data)
-val_loss = val_loss_function(val_output, val_data.targets.to(device))
-total_loss += val_loss
-print(f'Validation loss at epoch {epoch}: {val_loss}')
-# Compute and report the average validation loss
-average_loss = total_loss // epoch
-print(f'Average Validation Loss: {average_loss}')
+
 
 net.eval()
 with torch.no_grad():
-    output = net(test_data)
-    loss = loss_function(output, test_data.targets.to(device))
-
-'''
+    print(f'Calculating Test Loss:')
+    test_output = net(test_data)
+    test_loss = loss_function(test_output, test_data.targets.to(device))
+    print(f'Test loss: {test_loss}')
+    

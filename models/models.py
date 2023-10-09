@@ -19,7 +19,7 @@ class PAINN(torch.nn.Module):
 
     def __init__(self, output_dim=1, state_dim=128,
                  num_message_passing_rounds=1, r_cut=10, n=20,
-                 num_phys_dims=3):
+                 num_phys_dims=3, device='cpu'):
         super().__init__()
 
         # Define dimensions and other hyperparameters
@@ -30,14 +30,7 @@ class PAINN(torch.nn.Module):
         self.r_cut = r_cut
         self.n = n
         self.num_phys_dims = num_phys_dims
-
-        # Check if a GPU is available
-        if torch.cuda.is_available():
-            print("GPU is available!")
-            self.device = torch.device("cuda:0")
-        else:
-            print("GPU is not available.")
-            self.device = torch.device("cpu")
+        self.device = device
 
         self.phi_net = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim),
@@ -286,7 +279,7 @@ class PAINN_2(torch.nn.Module):
 
     def __init__(self, output_dim=1, state_dim=128,
                  num_message_passing_rounds=1, r_cut=10, n=20,
-                 num_phys_dims=3):
+                 num_phys_dims=3, device='cpu'):
         super().__init__()
 
         # Define dimensions and other hyperparameters
@@ -297,14 +290,7 @@ class PAINN_2(torch.nn.Module):
         self.r_cut = r_cut
         self.n = n
         self.num_phys_dims = num_phys_dims
-
-        # Check if a GPU is available
-        if torch.cuda.is_available():
-            print("GPU is available!")
-            self.device = torch.device("cuda:0")
-        else:
-            print("GPU is not available.")
-            self.device = torch.device("cpu")
+        self.device = device
 
         self.phi_net = torch.nn.Sequential(
             torch.nn.Linear(self.state_dim, self.state_dim),
@@ -313,7 +299,7 @@ class PAINN_2(torch.nn.Module):
         ).to(self.device)
 
         self.filter_net = torch.nn.Sequential(
-            RadialBasisFunction(self.n, self.r_cut),
+            RadialBasisFunction(self.n, self.r_cut, self.device),
             torch.nn.Linear(self.n, self.state_dim*3),
         ).to(self.device)
         
@@ -495,8 +481,12 @@ class PAINN_2(torch.nn.Module):
             self.state_vec += U_product_a_vv
 
         # Aggretate: Sum node features
+
+        #Index aligned in case data split starts at non zero index:
+        index_aligned = x.node_graph_index - x.node_graph_index[0]
+
         self.graph_state = torch.zeros((x.num_graphs, self.state_dim)).to(self.device)
-        self.graph_state.index_add_(0, x.node_graph_index.to(self.device), self.state)
+        self.graph_state.index_add_(0, index_aligned.to(self.device), self.state)
 
         # Output
         out = self.output_net(self.graph_state)

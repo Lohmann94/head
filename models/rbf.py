@@ -4,18 +4,11 @@ import torch.nn.functional as F
 
 
 class RadialBasisFunction(nn.Module):
-    def __init__(self, n=20, r_cut=20):
+    def __init__(self, n=20, r_cut=20, device='cpu'):
         super(RadialBasisFunction, self).__init__()
         self.n = n
         self.r_cut = r_cut
-
-        # Check if a GPU is available
-        if torch.cuda.is_available():
-            print("GPU is available!")
-            self.device = torch.device("cuda:0")
-        else:
-            print("GPU is not available.")
-            self.device = torch.device("cpu")
+        self.device = device
 
 
     def forward(self, x):
