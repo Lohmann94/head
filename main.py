@@ -1,100 +1,110 @@
 import torch
-from data.processed.cross_coupling import datasets
 import numpy as np
 from utillities.helper import Helper
+from utillities.plotting import single_loss_plotter, test_loss_plotter
 from models.rbf import RadialBasisFunction
 from models.f_cut import CosineCutoff
 from models.models import PAINN, PAINN_2
-from data.processed.cross_coupling import datasets
 from tqdm import tqdm
 import os
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
+from data.dataprep import dataprep
 
 load_dotenv()
 
-#os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+gpu = bool(os.getenv('GPU'))
+test = bool(os.getenv('TEST'))
+train_split = float(os.getenv('TRAIN_SPLIT'))
+val_split = float(os.getenv('VAL_SPLIT'))
+test_split = float(os.getenv('TEST_SPLIT'))
+num_graphs = int(os.getenv('NUM_GRAPHS'))
+ensemble = int(os.getenv('ENSEMBLE'))
 
-train_data = datasets.Cross_coupling_optimized_eom2Lig(start_index=tr_start_index, end_index=tr_end_index)
-val_data = datasets.Cross_coupling_optimized_eom2Lig(start_index=v_start_index, end_index=v_end_index)
-test_data = datasets.Cross_coupling_optimized_eom2Lig(start_index=te_start_index, end_index=te_end_index)
-#data = datasets.Tetris()
-gpu = os.getenv('GPU')
+num_phys_dims = int(os.getenv('NUM_PHYS_DIMS'))
+num_message_passing_rounds = int(os.getenv('NUM_MESSAGE_PASSING_ROUNDS'))
+r_cut = int(os.getenv('R_CUT'))
+
+learning_rate = float(os.getenv('LEARNING_RATE'))
+weight_decay = float(os.getenv('WEIGHT_DECAY'))
+
+epochs = range(int(os.getenv('EPOCHS')))
+validation_index = int(os.getenv('VALIDATION_INDEX'))
+plotting = bool(os.getenv('PLOTTING'))
+
 # Check if a GPU is available
-if torch.cuda.is_available() and gpu == 'True':
+if torch.cuda.is_available() and gpu == True:
     print("GPU is available!")
     torch.cuda.set_device(0)
 
+datasets = dataprep(test, train_split, val_split,
+                    test_split, num_graphs, ensemble)
+
+
+print(f'Ensemble size: {len(datasets)}')
+
+test_losses = []
 
 # Network, loss function, and optimizer
 #net = GNNInvariant(output_dim=data.num_graphs, state_dim = 5)
-#TODO fiks at r_cut fungerer på painn2
-#TODO check at loss bliver evalueret rigtigt på targets, i og med at vi flattener output
-#TODO Spørg Mikkel hvad modellen skal defaulte til, hvis der ikke er nogen naboer indenfor skæringsgrænsen
+# TODO fiks at r_cut fungerer på painn2
 
-net = PAINN_2(num_phys_dims=3, num_message_passing_rounds=5, r_cut=4)
-loss_function = torch.nn.MSELoss()
-optimizer = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=0.01)
+for ensemble_model in range(len(datasets)):
 
-epochs = range(100)
-val_calc_index = 5
-val_epoch = 0
-total_loss = 0
+    net = PAINN_2(num_phys_dims=num_phys_dims,
+                  num_message_passing_rounds=num_message_passing_rounds,
+                  r_cut=r_cut)
 
-train_losses = []
-val_losses = []
-test_losses = []
+    loss_function = torch.nn.MSELoss()
+    optimizer = torch.optim.Adam(net.parameters(),
+                                 lr=learning_rate,
+                                 weight_decay=weight_decay)
 
-#TODO spørg: Hvorfor driller modellen når man prøver at smide et andet datasæt i?
-for epoch in epochs:
-    print(f'Calculating Training Loss:')
-    optimizer.zero_grad()
-    output = net(train_data)
-    loss = loss_function(output, train_data.targets)
-    train_losses.append(loss.item())
-    loss.backward()
-    optimizer.step()
-    print(f'Epoch: {epoch}, Training Loss: {loss}')
+    train_losses = []
+    val_losses = []
+    total_val_loss = 0
 
-    #TODO fiks at alle tensors initialiseres til device og ikke flyttes
+    for epoch in epochs:
+        print(f'Calculating Training Loss:')
+        optimizer.zero_grad()
+        output = net(datasets[ensemble_model]['tra'])
+        loss = loss_function(output, datasets[ensemble_model]['tra'].targets)
+        train_losses.append(loss.item())
+        loss.backward()
+        optimizer.step()
+        print(f'Epoch: {epoch}, Training Loss: {loss}')
 
-    if epoch % val_calc_index == 0:
-        print(f'Calculating Validation Loss:')
-        val_epoch += 1
-        net.eval()
-        with torch.no_grad():
-            val_output = net(val_data)
-            val_loss = loss_function(val_output, val_data.targets)
-            val_losses.append(val_loss.item())
-            total_loss += val_loss
-            print(f'Validation loss at epoch {epoch}: {val_loss}')
-            # Compute and report the average validation loss
-            if epoch != 0:
-                average_loss = total_loss / val_epoch
-                print(f'Average Validation Loss: {average_loss}')
-        net.train()
+        # TODO fiks at alle tensors initialiseres til device og ikke flyttes
 
+        if epoch % validation_index == 0:
 
-net.eval()
-with torch.no_grad():
-    print(f'Calculating Test Loss:')
-    test_output = net(test_data)
-    test_loss = loss_function(test_output, test_data.targets)
-    test_losses.append(test_loss.item())
-    print(f'Test loss: {test_loss}')
+            print(f'Calculating Validation Loss:')
+            net.eval()
 
-# Creating subplots for train and validation losses
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
-ax1.plot(epochs, train_losses, label='Train Loss')
-ax1.set_ylabel('Loss')
-ax1.legend()
-ax2.plot(np.arange(0, len(epochs), val_calc_index), val_losses, label='Validation Loss')
-ax2.set_xlabel('Epoch')
-ax2.set_ylabel('Loss')
-ax2.legend()
+            with torch.no_grad():
 
-plt.tight_layout()  # Ensure proper spacing between subplots
-plt.show()
+                val_output = net(datasets[ensemble_model]['val'])
+                val_loss = loss_function(
+                    val_output, datasets[ensemble_model]['val'].targets)
+                val_losses.append(val_loss.item())
+                total_val_loss += val_loss
+                print(f'Validation loss at epoch {epoch}: {val_loss}')
+                # Compute and report the average validation loss
+                if epoch != 0:
+                    average_loss = total_val_loss / len(val_losses)
+                    print(f'Average Validation Loss: {average_loss}')
+            net.train()
 
+    single_loss_plotter(epochs, train_losses, val_losses, validation_index, plotting, ensemble_model)
 
-    
+    net.eval()
+    with torch.no_grad():
+        print(f'Calculating Test Loss:')
+        test_output = net(datasets[ensemble_model]['tes'])
+        test_loss = loss_function(
+            test_output, datasets[ensemble_model]['tes'].targets)
+        test_losses.append(test_loss.item())
+        print(f'Test loss: {test_loss}')
+
+#TODO overall plotting function here
+test_loss_plotter(test_losses, plotting)
