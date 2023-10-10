@@ -1,6 +1,8 @@
 from matplotlib import pyplot as plt
 import numpy as np
-def single_loss_plotter(epochs, train_losses, val_losses, val_calc_index, plotting, ensemble_model):
+def single_loss_plotter(epochs, train_losses, val_losses, val_calc_index, plotting, ensemble_model, folder_name):
+    plt.clf()
+    
     # Creating subplots for train and validation losses
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
 
@@ -20,11 +22,14 @@ def single_loss_plotter(epochs, train_losses, val_losses, val_calc_index, plotti
     # Ensuring proper spacing between subplots
     plt.tight_layout()
 
+    plt.savefig(f'{folder_name}/model_{ensemble_model}_losses.png')
+
     if plotting:
         plt.show()
 
-def test_loss_plotter(test_losses, plotting):
+def test_loss_plotter(test_losses, plotting, folder_name):
 
+    plt.clf()
     # Create the x-axis values (indices of the test_losses list)
     x = np.arange(len(test_losses))
 
@@ -35,6 +40,8 @@ def test_loss_plotter(test_losses, plotting):
     plt.xlabel('Model')
     plt.ylabel('Test Loss')
     plt.title('Test Losses for models')
+
+    plt.savefig(f'{folder_name}/test_losses.png')
 
     if plotting:
         # Show the plot

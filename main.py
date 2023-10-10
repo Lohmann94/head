@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from utillities.helper import Helper
 from utillities.plotting import single_loss_plotter, test_loss_plotter
+from utillities.normalize_targets import normalize_targets
 from models.rbf import RadialBasisFunction
 from models.f_cut import CosineCutoff
 from models.models import PAINN, PAINN_2
@@ -10,6 +11,7 @@ import os
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 from data.dataprep import dataprep
+from datetime import datetime
 
 load_dotenv()
 
@@ -37,11 +39,30 @@ if torch.cuda.is_available() and gpu == True:
     print("GPU is available!")
     torch.cuda.set_device(0)
 
+print('Loading data...')
 datasets = dataprep(test, train_split, val_split,
                     test_split, num_graphs, ensemble)
 
+print('Normalizing Targets...')
+#TODO check med Mikkel om normalisering over både tra, val og tes er rigtig
+datasets = normalize_targets(datasets)
 
 print(f'Ensemble size: {len(datasets)}')
+
+# Get the current datetime
+current_datetime = datetime.now()
+
+# Format the datetime as a folder name string
+folder_time = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+
+
+if test:
+    folder_name = f'models/experiments/tests/{folder_time}'
+else:
+    new_folder_name = f'NG{num_graphs}_EN{ensemble}_RC{r_cut}_LR{learning_rate}_EP{epochs[-1]+1}_{folder_time}'
+    folder_name = f'models/experiments/real/{new_folder_name}'
+
+os.mkdir(folder_name)
 
 test_losses = []
 
@@ -95,7 +116,7 @@ for ensemble_model in range(len(datasets)):
                     print(f'Average Validation Loss: {average_loss}')
             net.train()
 
-    single_loss_plotter(epochs, train_losses, val_losses, validation_index, plotting, ensemble_model)
+    single_loss_plotter(epochs, train_losses, val_losses, validation_index, plotting, ensemble_model, folder_name)
 
     net.eval()
     with torch.no_grad():
@@ -106,5 +127,13 @@ for ensemble_model in range(len(datasets)):
         test_losses.append(test_loss.item())
         print(f'Test loss: {test_loss}')
 
-#TODO overall plotting function here
-test_loss_plotter(test_losses, plotting)
+    if not test:
+        print('Saving model...')
+        if not os.path.exists(f'{folder_name}/trained_models'):
+            os.mkdir(f'{folder_name}/trained_models')
+        save_path = f'{folder_name}/trained_models/model_{ensemble_model}.pth'
+        torch.save(net.state_dict(), save_path)
+
+#TODO Spørg mikkel om ensemble modeller skal have seperate test-sets eller samme for alle modeller
+#TODO normalisér targets
+test_loss_plotter(test_losses, plotting, folder_name)
