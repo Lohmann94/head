@@ -1,14 +1,15 @@
 import torch
 def normalize_targets(datasets):
-    
+    #Normaliser på baggrund af træningssættet
+    #TODO standard afvigelse og gennemsnit på ensemble predictions af energier
+
     for dataset in datasets.values():
 
-        combined = torch.cat((dataset['tra'].targets, dataset['val'].targets, dataset['tes'].targets))
-        combined_mean = combined.mean()
-        combined_std = combined.std()
+        tra_mean = dataset['tra'].targets.mean()
+        tra_std = dataset['tra'].targets.std()
 
-        dataset['tra'].targets = (dataset['tra'].targets - combined_mean) / combined_std
-        dataset['val'].targets = (dataset['val'].targets - combined_mean) / combined_std
-        dataset['tes'].targets = (dataset['tes'].targets - combined_mean) / combined_std
+        dataset['tra'].targets = (dataset['tra'].targets - tra_mean) / tra_std
+        dataset['val'].targets = (dataset['val'].targets - tra_mean) / tra_std
+        dataset['tes'].targets = (dataset['tes'].targets - tra_mean) / tra_std
         
     return datasets
