@@ -328,7 +328,7 @@ class PAINN_2(torch.nn.Module):
 
         # Initialize edge vector features to zeros, change when two-dimensional problem
         self.state_vec = torch.zeros(
-            [x.num_nodes, self.num_phys_dims, self.state_dim])
+            [x.node_graph_index.shape[0], self.num_phys_dims, self.state_dim])
 
         # For all edges in dataset, get the atom number of the 'ending' node in all edges
         self.all_nbrs = torch.tensor(
@@ -354,13 +354,9 @@ class PAINN_2(torch.nn.Module):
         self.masked_node_from = torch.masked_select(
             x.node_from, self.nbr_mask.bool())
 
-        print(
-            f'Excluded edges over r_cut: {x.node_from.shape[0] - self.masked_node_to.shape[0]}')
-
-        for _ in tqdm(range(self.num_message_passing_rounds)):
+        for _ in range(self.num_message_passing_rounds):
 
             # Input is the state of all neigbour edges indexed by atomtype of the node through state embedding: test: 76 x 128
-            # TODO: prøv med  self.masked_node_to, ret andre repræsentationer længere nede også
             inp = self.state[self.masked_node_to]
 
             # 1
@@ -393,7 +389,6 @@ class PAINN_2(torch.nn.Module):
 
             sum_split_1_and_3 = torch.add(
                 state_vec_split_1, normalized_split_3)
-            # TODO kig hele tildeling af state-repræsentation og node_to / node_from igennem igen
             # Doing index add over masked edges from neigbour nodes to state
             self.state.index_add_(0, self.masked_node_from, message_split_2)
             self.state_vec.index_add_(
@@ -447,7 +442,10 @@ class PAINN_2(torch.nn.Module):
         # Aggretate: Sum node features
 
         # Index aligned in case data split starts at non zero index:
-        index_aligned = x.node_graph_index - x.node_graph_index[0]
+        align_dict = {value.item(): dice for dice, value in enumerate(
+            torch.unique(x.node_graph_index))}
+        index_aligned = x.node_graph_index.apply_(
+            lambda item: align_dict[item])
 
         self.graph_state = torch.zeros((x.num_graphs, self.state_dim))
 

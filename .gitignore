@@ -146,6 +146,10 @@ data/
 # models saved with pickle
 *.sav
 
+*.csv
+*.json
+*.txt
+
 
 
 # Grid implemenation

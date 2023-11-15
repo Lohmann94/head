@@ -7,12 +7,13 @@ def single_loss_plotter(epochs, train_losses, val_losses, val_calc_index, plotti
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
 
     # Plotting train loss
-    ax1.plot(epochs, train_losses, label='Train Loss')
+    ax1.plot(epochs, train_losses, label='Train Loss', color='blue')
+    ax1.set_xlabel('Epochs')
     ax1.set_ylabel(f'Model {ensemble_model} Loss')
 
     # Plotting validation loss
-    ax2.plot(np.arange(0, len(epochs), val_calc_index), val_losses, label='Validation Loss')
-    ax2.set_xlabel('Epoch')
+    ax2.plot(np.arange(0, len(val_losses)), val_losses, label='Validation Loss', color='red')
+    ax2.set_xlabel('Val timestamps')
     ax2.set_ylabel(f'Model {ensemble_model} Loss')
 
     # Setting legends
