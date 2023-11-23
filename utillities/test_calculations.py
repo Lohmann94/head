@@ -5,17 +5,21 @@ import numpy as np
 
 def test_calcs(test_targets, test_preds, folder_name, plotting=True):
 
-    print('Saving test calculations...')
-    if not os.path.exists(f'{folder_name}/test_calculations'):
-        os.mkdir(f'{folder_name}/test_calculations')
+    import random
+    random_number = random.randint(0, 10000)
+    print(random_number)
 
-    with open(f'{folder_name}/test_calculations/targets.csv', 'w', newline='') as file:
+    print('Saving test calculations...')
+    if not os.path.exists(f'{folder_name}/test_calculations_{random_number}'):
+        os.mkdir(f'{folder_name}/test_calculations_{random_number}')
+
+    with open(f'{folder_name}/test_calculations_{random_number}/targets.csv', 'w', newline='') as file:
         writer = csv.writer(file)
         # Write the dictionary to the CSV file
         for key, value in test_targets.items():
             writer.writerow([key] + value)
 
-    with open(f'{folder_name}/test_calculations/predictions.csv', 'w', newline='') as file:
+    with open(f'{folder_name}/test_calculations_{random_number}/predictions.csv', 'w', newline='') as file:
         writer = csv.writer(file)
         # Write the dictionary to the CSV file
         for key, value in test_preds.items():
@@ -40,7 +44,7 @@ def test_calcs(test_targets, test_preds, folder_name, plotting=True):
         ensemble_stds.append(np.std(prediction_target_index[target]))
         ensemble_variances.append(np.var(prediction_target_index[target]))
 
-    with open(f'{folder_name}/test_calculations/ensemble_stats.txt', 'w') as file:
+    with open(f'{folder_name}/test_calculations_{random_number}/ensemble_stats.txt', 'w') as file:
         file.writelines(
             [f'ensemble_means Line {i+1}: {x}\n' for i, x in enumerate(ensemble_means)])
         file.writelines(
@@ -50,11 +54,11 @@ def test_calcs(test_targets, test_preds, folder_name, plotting=True):
 
     # Plotting the data
 
-    error_means_targets = [abs(pred - mean) for pred, mean in zip(ensemble_means ,all_test_targets)]
+    squared_error_means_targets = [(pred - mean)**2 for pred, mean in zip(ensemble_means ,all_test_targets)]
 
-    uncertainty_dict = dict(zip(ensemble_variances, error_means_targets))
+    uncertainty_dict = dict(zip(ensemble_variances, squared_error_means_targets))
 
-    sorted_uncertainty_dict = sorted_dict = dict(sorted(uncertainty_dict.items()))
+    sorted_uncertainty_dict = dict(sorted(uncertainty_dict.items()))
     if plotting:
         import matplotlib.pyplot as plt
 
@@ -83,7 +87,7 @@ def test_calcs(test_targets, test_preds, folder_name, plotting=True):
         plt.legend()
 
         plt.savefig(
-            f'{folder_name}/test_calculations/test_scatter.png',
+            f'{folder_name}/test_calculations_{random_number}/test_scatter.png',
         )
 
         # Display the plot
@@ -92,7 +96,7 @@ def test_calcs(test_targets, test_preds, folder_name, plotting=True):
         plt.clf()
 
         variances = list(sorted_uncertainty_dict.keys())
-        absolute_errors = list(sorted_uncertainty_dict.values())
+        squared_errors = list(sorted_uncertainty_dict.values())
 
         # Define the number of bins
         num_bins = min(int(len(variances) / 2), 10)
@@ -105,7 +109,7 @@ def test_calcs(test_targets, test_preds, folder_name, plotting=True):
         binned_predictions = [[] for _ in range(num_bins)]
 
         # Bin the predictions based on the error values
-        for prediction, error in zip(absolute_errors, variances):
+        for prediction, error in zip(squared_errors, variances):
             bin_index = np.searchsorted(bin_boundaries, error) - 1
             binned_predictions[bin_index].append(prediction)
 
@@ -115,10 +119,13 @@ def test_calcs(test_targets, test_preds, folder_name, plotting=True):
             plt.scatter(bin_x, bin_pred,alpha=0.5, label=f'Bin {i+1}')
 
         plt.xlabel('Variance Bins')
-        plt.ylabel('Absolute Errors')
-        plt.title('Variance vs Absolute Error Bins')
+        plt.ylabel('Squarred Errors')
+        plt.title('Variance vs Squarred Error Bins')
         plt.legend()
 
+        plt.savefig(
+            f'{folder_name}/test_calculations_{random_number}/variance_error.png',
+        )
         # Display the plot
         plt.show()
 

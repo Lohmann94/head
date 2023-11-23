@@ -1,5 +1,6 @@
 from matplotlib import pyplot as plt
 import numpy as np
+import os
 def single_loss_plotter(epochs, train_losses, val_losses, val_calc_index, plotting, ensemble_model, folder_name):
     plt.clf()
     
@@ -42,7 +43,10 @@ def test_loss_plotter(test_losses, plotting, folder_name):
     plt.ylabel('Test Loss')
     plt.title('Test Losses for models')
 
-    plt.savefig(f'{folder_name}/test_losses.png')
+    if not os.path.exists(f'{folder_name}'):
+            os.mkdir(f'{folder_name}/test_losses')
+
+    plt.savefig(f'{folder_name}test_losses.png')
 
     if plotting:
         # Show the plot

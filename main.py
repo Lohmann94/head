@@ -21,6 +21,7 @@ from data.processed.cross_coupling.datasets import Cross_coupling_optimized_eom2
 from torch.utils.data import DataLoader
 from data.processed.cross_coupling.datasets import Tetris, Circles
 from utillities.test_calculations import test_calcs
+import pickle
 
 start_time = time.time()
 
@@ -75,8 +76,7 @@ os.mkdir(folder_name)
 
 test_losses = []
 
-seeds = [random.sample(range(1, 1000), 1)[0]
-         for i in range(env_vars['ensemble'])]
+seeds = [49, 10, 100, 20, 30, 90, 52, 7, 9, 87]
 
 print(f'Seeds: {seeds}')
 
@@ -145,6 +145,13 @@ for ensemble_model in range(env_vars['ensemble']):
                 f'Epoch: {epoch}, batch: {batch_index}, Training Loss: {loss}')
             batch_index += 1
 
+        if not env_vars['test']:
+            print('Saving model checkpoint...')
+            if not os.path.exists(f'{folder_name}/trained_models'):
+                os.mkdir(f'{folder_name}/trained_models')
+            save_path = f'{folder_name}/trained_models/model_{epoch}_checkpoint.pth'
+            torch.save(net, save_path)
+
         # Calculate average training loss for the epoch
         print(
             f'Total training loss over batches: {train_loss}, epoch {epoch}\n')
@@ -161,7 +168,7 @@ for ensemble_model in range(env_vars['ensemble']):
             if not os.path.exists(f'{folder_name}/trained_models'):
                 os.mkdir(f'{folder_name}/trained_models')
             save_path = f'{folder_name}/trained_models/model_{ensemble_model}_checkpoint.pth'
-            torch.save(net.state_dict(), save_path)
+            torch.save(net, save_path)
 
         if epoch % env_vars['validation_index'] == 0:
 
@@ -199,6 +206,11 @@ for ensemble_model in range(env_vars['ensemble']):
                     tqdm.write(f'Average Validation Loss: {average_loss}')
 
                 net.train()
+            print(f'Saving losses...')
+            with open(f'{folder_name}/train_losses_{ensemble_model}.pickle', 'wb') as file:
+                pickle.dump(train_losses, file)
+            with open(f'{folder_name}/val_losses_{ensemble_model}.pickle', 'wb') as file:
+                pickle.dump(val_losses, file)
 
     all_train_losses.append(train_losses)
     single_loss_plotter(env_vars['epochs'], all_train_losses[ensemble_model], val_losses[ensemble_model],
@@ -227,7 +239,7 @@ for ensemble_model in range(env_vars['ensemble']):
         if not os.path.exists(f'{folder_name}/trained_models'):
             os.mkdir(f'{folder_name}/trained_models')
         save_path = f'{folder_name}/trained_models/model_{ensemble_model}.pth'
-        torch.save(net.state_dict(), save_path)
+        torch.save(net, save_path)
 
 test_loss_plotter(test_losses, False, folder_name)
 test_calcs(test_targets, test_preds, folder_name)
