@@ -40,6 +40,8 @@ else:
 # Get the current datetime
 current_datetime = datetime.now()
 
+best_metric = float('inf')
+
 # Format the datetime as a folder name string
 folder_time = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -127,6 +129,9 @@ for ensemble_model in range(env_vars['ensemble']):
     total_val_loss = 0
 
     train_losses = []
+
+    epochs_without_improvement = 0
+    early_stopping_patience = 10
     for epoch in env_vars['epochs']:
         train_loss = 0.0
         print(f'ensemble {ensemble_model} Calculating Training Loss:')
@@ -194,6 +199,16 @@ for ensemble_model in range(env_vars['ensemble']):
                     else:
                         exp_smooth_val_loss = val_losses[ensemble_model][-1]
 
+                    if exp_smooth_val_loss < best_metric:
+                        best_metric = exp_smooth_val_loss
+                        epochs_without_improvement = 0
+                    else:
+                        epochs_without_improvement += 1
+                    
+                    if epochs_without_improvement >= early_stopping_patience:
+                        print("Early stopping triggered. Stopping training.")
+                        break
+                    
                     scheduler.step(exp_smooth_val_loss)
 
                     tqdm.write(

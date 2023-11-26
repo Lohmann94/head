@@ -150,6 +150,9 @@ data/
 *.json
 *.txt
 *.pickle
+*.pkl
+*.err
+*.out
 
 
 
